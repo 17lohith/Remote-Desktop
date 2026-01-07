@@ -1,0 +1,3 @@
+# requirements-relay.txt
+# Minimal dependencies for the relay server only (used in Docker)
+websockets>=12.0,<14.0
