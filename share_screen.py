@@ -54,6 +54,11 @@ Examples:
         capture_fps=args.fps,
         jpeg_quality=args.quality
     )
+    
+    print(f"\n⚙️  Performance Settings:")
+    print(f"   FPS: {args.fps} (lower = less bandwidth)")
+    print(f"   Quality: {args.quality}% (lower = faster encoding)")
+    print(f"   Tip: Use --fps 15 --quality 50 for slower connections\n")
 
     agent = RelayHostAgent(config)
 

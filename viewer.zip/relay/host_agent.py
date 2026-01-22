@@ -234,13 +234,13 @@ class RelayHostAgent:
 
         while self._running:
             try:
+                # Wait for frame timing
+                await self.rate_limiter.wait_async()
+
                 # Skip if no client connected
                 if not self._client_connected:
                     await asyncio.sleep(0.1)
                     continue
-
-                # Wait for frame timing
-                await self.rate_limiter.wait_async()
 
                 # Capture frame
                 frame = self.capture.grab()
