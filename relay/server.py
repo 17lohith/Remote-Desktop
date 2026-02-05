@@ -328,10 +328,6 @@ class RelayServer:
             logger.info(f"Client disconnected: {session.session_code}")
         except Exception as e:
             logger.error(f"Client relay loop error: {e}")
-        finally:
-            # Client disconnected, but keep session for host
-            if session.session_code in self._sessions:
-                session.client_ws = None
 
     async def _handle_disconnect(self, websocket: WebSocketServerProtocol) -> None:
         """Handle WebSocket disconnection."""
