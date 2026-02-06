@@ -1,0 +1,15 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+venv/
+.env
+.DS_Store
+*.zip
+test_*.py
+TECHNICAL_DOCUMENTATION.md
+deploy_ec2.sh
+host/
+client/
+*.log

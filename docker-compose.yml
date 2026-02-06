@@ -8,14 +8,10 @@ services:
       - "8765:8765"
     environment:
       - RD_LOG_LEVEL=INFO
-      - RD_HOST_FPS=24
-      - RD_HOST_JPEG_QUALITY=60
     restart: unless-stopped
-    volumes:
-      - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "python", "-c", "import asyncio; asyncio.run(__import__('websockets').connect('ws://localhost:8765'))"]
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('localhost', 8765)); s.close()"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 10s
