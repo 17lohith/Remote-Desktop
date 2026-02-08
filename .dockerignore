@@ -1,15 +1,65 @@
+# ---- Docker ignore for relay-server image ----
+# Goal: only ship common/, relay/, run_relay.py, requirements-relay.txt
+
+# Version control
 .git
+.gitignore
+
+# Host & client code (not needed in relay container)
+host/
+client/
+
+# Entry-point scripts that are NOT the relay
+run_server.py
+share_screen.py
+view_screen.py
+
+# Host-agent & viewer inside relay/ (only server.py is needed,
+# but we COPY individual files so this is just defence-in-depth)
+relay/host_agent.py
+relay/viewer.py
+
+# Tests
+test_*.py
+tests/
+pytest.ini
+.pytest_cache/
+
+# Python artifacts
 __pycache__
 *.pyc
 *.pyo
 *.egg-info
 venv/
-.env
-.DS_Store
-*.zip
-test_*.py
-TECHNICAL_DOCUMENTATION.md
+.venv/
+
+# Signaling server (local-network mode, not used by relay)
+signaling/
+
+# Build / deploy scripts
 deploy_ec2.sh
-host/
-client/
+docker-compose.yml
+Dockerfile
+
+# Docs & archives
+*.md
+*.zip
+*.tar.gz
+docs/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
 *.log
+logs/
+
+# Env
+.env
+.env.*
