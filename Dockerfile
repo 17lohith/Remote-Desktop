@@ -1,23 +1,42 @@
-# Dockerfile for Remote Desktop Relay Server
+# ---- Remote Desktop Relay Server ----
+# Lightweight, production-ready image.
+# Only ships the relay server (no GUI, no screen-capture code).
 
-FROM python:3.11-slim
+FROM python:3.11-slim AS base
+
+# Labels
+LABEL maintainer="Remote Desktop Project"
+LABEL description="Relay server for cross-network remote desktop connections"
+
+# No .pyc files, unbuffered stdout so logs appear in docker logs
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Only install what the relay server needs
-RUN pip install --no-cache-dir websockets>=12.0
+# ---- Dependencies ----
+# The relay server only needs the websockets library.
+COPY requirements-relay.txt .
+RUN pip install --no-cache-dir -r requirements-relay.txt
 
-# Copy only the files the relay server needs
-COPY common/ ./common/
-COPY relay/ ./relay/
-COPY run_relay.py .
+# ---- Application code ----
+# Copy ONLY what the relay server imports:
+#   run_relay.py  ->  relay/server.py  ->  common/protocol.py
+#                                      ->  common/config.py  (loaded but not critical)
+COPY common/__init__.py  common/__init__.py
+COPY common/protocol.py  common/protocol.py
+COPY common/config.py    common/config.py
+COPY relay/__init__.py   relay/__init__.py
+COPY relay/server.py     relay/server.py
+COPY run_relay.py        run_relay.py
 
-# Expose port
+# ---- Runtime ----
 EXPOSE 8765
 
-# Health check - simple TCP connection test
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('localhost', 8765)); s.close()" || exit 1
+# Healthcheck: plain TCP connect – fast, no extra deps.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',8765)); s.close()"
 
-# Run relay server
-CMD ["python", "run_relay.py", "--host", "0.0.0.0", "--port", "8765"]
+# The relay server binds 0.0.0.0 so it is reachable outside the container.
+ENTRYPOINT ["python", "run_relay.py"]
+CMD ["--host", "0.0.0.0", "--port", "8765"]
