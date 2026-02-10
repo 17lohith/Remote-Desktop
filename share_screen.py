@@ -16,6 +16,13 @@ import sys
 
 from relay.host_agent import RelayHostAgent, RelayHostConfig
 
+# ---------------------------------------------------------------
+# Default relay URL – change this when you deploy to EC2:
+#   Local  : ws://127.0.0.1:8765
+#   EC2    : ws://<EC2_PUBLIC_IP>:8765
+# ---------------------------------------------------------------
+DEFAULT_RELAY = "ws://127.0.0.1:8765"
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -33,8 +40,8 @@ Examples:
     python share_screen.py --relay ws://your-server.com:8765 --fps 24 --quality 60
 """
     )
-    parser.add_argument("--relay", required=True,
-                       help="Relay server URL (e.g., ws://relay.example.com:8765)")
+    parser.add_argument("--relay", default=DEFAULT_RELAY,
+                       help=f"Relay server URL (default: {DEFAULT_RELAY})")
     parser.add_argument("--fps", type=int, default=30,
                        help="Target frames per second (default: 30)")
     parser.add_argument("--quality", type=int, default=70,

@@ -127,8 +127,9 @@ class RelayServer:
             self.host,
             self.port,
             max_size=10 * 1024 * 1024,  # 10MB max message
-            ping_interval=20,
-            ping_timeout=10
+            ping_interval=30,
+            ping_timeout=120,
+            close_timeout=60
         ) as server:
             self._server = server
             logger.info("Relay server started. Waiting for connections...")

@@ -15,6 +15,13 @@ import sys
 
 from relay.viewer import RelayViewer
 
+# ---------------------------------------------------------------
+# Default relay URL – change this when you deploy to EC2:
+#   Local  : ws://127.0.0.1:8765
+#   EC2    : ws://<EC2_PUBLIC_IP>:8765
+# ---------------------------------------------------------------
+DEFAULT_RELAY = "ws://127.0.0.1:8765"
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -29,8 +36,8 @@ Examples:
     python view_screen.py --relay ws://localhost:8765 --code ABC123 --scale 0.5
 """
     )
-    parser.add_argument("--relay", required=True,
-                       help="Relay server URL")
+    parser.add_argument("--relay", default=DEFAULT_RELAY,
+                       help=f"Relay server URL (default: {DEFAULT_RELAY})")
     parser.add_argument("--code", required=True,
                        help="6-character session code from host")
     parser.add_argument("--scale", type=float, default=1.0,

@@ -88,8 +88,9 @@ class RelayHostAgent:
             self._websocket = await websockets.connect(
                 self.config.relay_url,
                 max_size=10 * 1024 * 1024,
-                ping_interval=20,
-                ping_timeout=10
+                ping_interval=None,
+                ping_timeout=None,
+                close_timeout=60
             )
 
             # Send host registration
