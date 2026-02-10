@@ -1,179 +1,157 @@
 #!/bin/bash
 # =================================================================
-# Remote Desktop Relay Server - AWS EC2 Deployment Script
+# Remote Desktop Relay Server - AWS EC2 Docker Deployment
 # =================================================================
-#
-# This script sets up the relay server on a fresh EC2 instance.
 #
 # Prerequisites:
-#   - Ubuntu 22.04 or Amazon Linux 2023 EC2 instance
-#   - SSH access to the instance
-#   - Security group with port 8765 open (TCP inbound)
+#   - Ubuntu 22.04 / Amazon Linux 2023 EC2 instance (t3.micro is fine)
+#   - SSH access
+#   - Security Group: port 8765 TCP inbound open
 #
 # Usage:
-#   1. Launch EC2 instance (t3.micro is sufficient)
-#   2. SSH into the instance
-#   3. Copy this project to the instance
-#   4. Run: chmod +x deploy_ec2.sh && ./deploy_ec2.sh
+#   1. SSH into EC2
+#   2. Clone or scp this project
+#   3. chmod +x deploy_ec2.sh && ./deploy_ec2.sh
 #
 # =================================================================
 
-set -e
+set -euo pipefail
 
 echo "==========================================="
-echo " Remote Desktop - Relay Server Deployment"
+echo " Remote Desktop Relay - EC2 Docker Deploy"
 echo "==========================================="
 echo ""
 
-# Detect OS
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    OS=$ID
+# -------------------------------------------------------------------
+# 1. Install Docker if missing
+# -------------------------------------------------------------------
+echo "[1/4] Checking Docker..."
+
+if command -v docker &> /dev/null; then
+    echo "  Docker already installed: $(docker --version)"
 else
-    OS="unknown"
+    echo "  Installing Docker..."
+
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+    else
+        OS="unknown"
+    fi
+
+    if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq docker.io
+    elif [ "$OS" = "amzn" ]; then
+        sudo yum install -y -q docker
+    else
+        echo "  Unknown OS – please install Docker manually."
+        exit 1
+    fi
+
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    sudo usermod -aG docker "$USER"
+    echo "  Docker installed. You may need to log out/in for group to take effect."
+    echo "  Continuing with sudo for now..."
+fi
+echo ""
+
+# Decide whether we need sudo for docker commands
+DOCKER_CMD="docker"
+if ! docker info &>/dev/null 2>&1; then
+    DOCKER_CMD="sudo docker"
 fi
 
-echo "Detected OS: $OS"
+# -------------------------------------------------------------------
+# 2. Build the image
+# -------------------------------------------------------------------
+echo "[2/4] Building Docker image..."
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+$DOCKER_CMD build -t rd-relay .
+echo "  Image built: rd-relay"
+echo "  Image size: $($DOCKER_CMD images rd-relay --format '{{.Size}}')"
 echo ""
 
 # -------------------------------------------------------------------
-# Step 1: Install system dependencies
+# 3. Run the container
 # -------------------------------------------------------------------
-echo "[1/5] Installing system dependencies..."
+echo "[3/4] Starting container..."
 
-if [ "$OS" = "ubuntu" ] || [ "$OS" = "debian" ]; then
-    sudo apt-get update -qq
-    sudo apt-get install -y -qq python3 python3-pip python3-venv git
-elif [ "$OS" = "amzn" ]; then
-    sudo yum update -y -q
-    sudo yum install -y -q python3 python3-pip git
-else
-    echo "Warning: Unknown OS. Please ensure Python 3.8+ is installed."
-fi
+# Stop old container if exists
+$DOCKER_CMD rm -f rd-relay 2>/dev/null || true
 
-echo "  Python version: $(python3 --version)"
-echo "  Done."
-echo ""
+$DOCKER_CMD run -d \
+    --name rd-relay \
+    --restart unless-stopped \
+    -p 8765:8765 \
+    rd-relay
 
-# -------------------------------------------------------------------
-# Step 2: Set up Python virtual environment
-# -------------------------------------------------------------------
-echo "[2/5] Setting up Python environment..."
-
-INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$INSTALL_DIR"
-
-python3 -m venv venv
-source venv/bin/activate
-
-pip install --upgrade pip -q
-pip install websockets>=12.0 -q
-
-echo "  Virtual environment: $INSTALL_DIR/venv"
-echo "  Done."
-echo ""
-
-# -------------------------------------------------------------------
-# Step 3: Verify the relay server works
-# -------------------------------------------------------------------
-echo "[3/5] Verifying relay server..."
-
-python3 -c "
-import sys
-sys.path.insert(0, '.')
-from relay.server import RelayServer, RelayMessageType, generate_session_code
-code = generate_session_code()
-print(f'  Module imports: OK')
-print(f'  Session code generation: {code}')
-print(f'  RelayServer class: OK')
-"
-
-echo "  Done."
-echo ""
-
-# -------------------------------------------------------------------
-# Step 4: Create systemd service
-# -------------------------------------------------------------------
-echo "[4/5] Creating systemd service..."
-
-SERVICE_FILE="/etc/systemd/system/remote-desktop-relay.service"
-
-sudo tee $SERVICE_FILE > /dev/null << EOF
-[Unit]
-Description=Remote Desktop Relay Server
-After=network.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=$USER
-Group=$USER
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/run_relay.py --host 0.0.0.0 --port 8765
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-# Security hardening
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=$INSTALL_DIR
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable remote-desktop-relay
-
-echo "  Service file: $SERVICE_FILE"
-echo "  Done."
-echo ""
-
-# -------------------------------------------------------------------
-# Step 5: Start the service
-# -------------------------------------------------------------------
-echo "[5/5] Starting relay server..."
-
-sudo systemctl start remote-desktop-relay
 sleep 2
 
-# Check if running
-if sudo systemctl is-active --quiet remote-desktop-relay; then
-    echo "  Status: RUNNING"
+# Verify it's running
+if $DOCKER_CMD ps --filter name=rd-relay --format '{{.Status}}' | grep -q "Up"; then
+    echo "  Container: RUNNING"
 else
-    echo "  Status: FAILED"
-    echo "  Check logs: sudo journalctl -u remote-desktop-relay -f"
+    echo "  Container: FAILED"
+    echo "  Logs:"
+    $DOCKER_CMD logs rd-relay
     exit 1
 fi
+echo ""
 
-# Get public IP
-PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "YOUR_EC2_PUBLIC_IP")
+# -------------------------------------------------------------------
+# 4. Verify connectivity
+# -------------------------------------------------------------------
+echo "[4/4] Verifying relay is reachable..."
+
+# TCP check from host
+if python3 -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',8765)); s.close()" 2>/dev/null; then
+    echo "  localhost:8765 -> OK"
+elif python -c "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',8765)); s.close()" 2>/dev/null; then
+    echo "  localhost:8765 -> OK"
+else
+    echo "  WARNING: Could not verify port locally (python may not be installed on host)."
+    echo "  Container logs:"
+    $DOCKER_CMD logs --tail 5 rd-relay
+fi
+
+# Get public IP (EC2 metadata endpoint)
+PUBLIC_IP=$(curl -s --connect-timeout 3 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "<YOUR_EC2_PUBLIC_IP>")
 
 echo ""
 echo "==========================================="
-echo " Deployment Complete!"
+echo " DEPLOYMENT COMPLETE"
 echo "==========================================="
 echo ""
-echo " Relay server is running on port 8765"
+echo " Container : rd-relay"
+echo " Status    : $($DOCKER_CMD ps --filter name=rd-relay --format '{{.Status}}')"
+echo " Port      : 8765"
 echo ""
 echo " Your relay URL:"
 echo ""
 echo "   ws://${PUBLIC_IP}:8765"
 echo ""
-echo " To share your screen:"
+echo " -------------------------------------------"
+echo " FROM YOUR LOCAL MACHINE:"
+echo ""
+echo "   # Share your screen"
 echo "   python share_screen.py --relay ws://${PUBLIC_IP}:8765"
 echo ""
-echo " To view a remote screen:"
+echo "   # View a remote screen"
 echo "   python view_screen.py --relay ws://${PUBLIC_IP}:8765 --code <CODE>"
 echo ""
-echo " Useful commands:"
-echo "   sudo systemctl status remote-desktop-relay"
-echo "   sudo systemctl restart remote-desktop-relay"
-echo "   sudo journalctl -u remote-desktop-relay -f"
+echo " -------------------------------------------"
+echo " CONTAINER MANAGEMENT:"
 echo ""
-echo " IMPORTANT: Make sure your EC2 Security Group"
-echo " has port 8765 open for TCP inbound traffic!"
+echo "   docker logs -f rd-relay          # live logs"
+echo "   docker restart rd-relay          # restart"
+echo "   docker stop rd-relay             # stop"
+echo "   docker start rd-relay            # start again"
+echo ""
+echo " IMPORTANT: Ensure your EC2 Security Group"
+echo " has port 8765 open for TCP inbound traffic."
 echo "==========================================="
