@@ -1,17 +1,16 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  relay-server:
+  relay:
     build: .
-    container_name: remote-desktop-relay
+    container_name: rd-relay
     ports:
       - "8765:8765"
-    environment:
-      - RD_LOG_LEVEL=INFO
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('localhost', 8765)); s.close()"]
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1',8765)); s.close()"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 5s
