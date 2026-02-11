@@ -357,12 +357,12 @@ def main():
     system = platform.system()
 
     print(f"""
-╔══════════════════════════════════════╗
-║   {APP_DISPLAY_NAME} — Build Tool       ║
-╠══════════════════════════════════════╣
-║   Version:  {VERSION:<25}║
-║   Platform: {system:<25}║
-╚══════════════════════════════════════╝
++======================================+
+|   {APP_DISPLAY_NAME} - Build Tool        |
++--------------------------------------+
+|   Version:  {VERSION:<25}|
+|   Platform: {system:<25}|
++======================================+
 """)
 
     # Step 1: Clean
@@ -402,13 +402,13 @@ def main():
 
     # Summary
     print(f"""
-╔══════════════════════════════════════╗
-║   Build Complete!                    ║
-╚══════════════════════════════════════╝
++======================================+
+|   Build Complete!                    |
++======================================+
 
   Artifacts:""")
     for a in artifacts:
-        print(f"    → {os.path.relpath(a, SCRIPT_DIR)}")
+        print(f"    > {os.path.relpath(a, SCRIPT_DIR)}")
 
     print(f"""
   Users just double-click to run.
