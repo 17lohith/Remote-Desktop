@@ -57,6 +57,12 @@ class RelayMessageType(IntEnum):
     # Data relay (these are forwarded as-is)
     RELAY_DATA = 0x20         # Bidirectional: Raw data to relay
 
+    # Remote control (these are forwarded as-is between host and client)
+    REQUEST_CONTROL = 0x30    # Client -> Host: Request mouse/keyboard control
+    CONTROL_GRANTED = 0x31    # Host -> Client: Control granted
+    CONTROL_DENIED = 0x32     # Host -> Client: Control denied
+    CONTROL_REVOKED = 0x33    # Host -> Client: Control revoked by host
+
 
 def generate_session_code(length: int = 6) -> str:
     """Generate a random session code (alphanumeric, uppercase)."""
@@ -73,6 +79,7 @@ class RelaySession:
     host_connected_at: float = field(default_factory=time.time)
     client_ws: Optional[WebSocketServerProtocol] = None
     client_connected_at: Optional[float] = None
+    control_granted: bool = False
 
     # Stats
     bytes_relayed_to_client: int = 0

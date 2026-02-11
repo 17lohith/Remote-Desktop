@@ -1,0 +1,150 @@
+name: Build Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macOS
+            artifact: RemoteDesktop-macOS
+          - os: windows-latest
+            platform: Windows
+            artifact: RemoteDesktop-Windows
+          - os: ubuntu-latest
+            platform: Linux
+            artifact: RemoteDesktop-Linux
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.platform }})
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Linux: install system dependencies
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev \
+            libjpeg-dev zlib1g-dev python3-tk xvfb \
+            libxkbcommon-x11-0 libxcb-xinerama0
+
+      # macOS: install system dependencies
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install sdl2 sdl2_image sdl2_mixer sdl2_ttf
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # Generate icons first (needed for build)
+      - name: Generate app icons
+        run: python assets/generate_icon.py
+
+      # Build using the build script
+      - name: Build app (macOS)
+        if: runner.os == 'macOS'
+        run: python build.py --clean --dmg --zip
+
+      - name: Build app (Windows)
+        if: runner.os == 'Windows'
+        run: python build.py --clean --zip
+
+      - name: Build app (Linux)
+        if: runner.os == 'Linux'
+        run: python build.py --clean
+
+      # Upload platform-specific artifacts
+      - name: Upload DMG (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteDesktop-macOS-DMG
+          path: dist/RemoteDesktop-macOS.dmg
+
+      - name: Upload ZIP (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteDesktop-macOS
+          path: dist/RemoteDesktop-macOS.zip
+
+      - name: Upload ZIP (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteDesktop-Windows
+          path: dist/RemoteDesktop-Windows.zip
+
+      - name: Upload tar.gz (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: RemoteDesktop-Linux
+          path: dist/RemoteDesktop-Linux.tar.gz
+
+  # Create a GitHub release with all builds
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Remote Desktop ${{ github.ref_name }}
+          body: |
+            ## Remote Desktop ${{ github.ref_name }}
+
+            Download the app for your platform. **No Python needed** — just download, extract, and run.
+
+            | Platform | Download | Instructions |
+            |----------|----------|--------------|
+            | **macOS** | `RemoteDesktop-macOS.dmg` | Open DMG, drag to Applications |
+            | **macOS** | `RemoteDesktop-macOS.zip` | Extract and double-click |
+            | **Windows** | `RemoteDesktop-Windows.zip` | Extract and run `RemoteDesktop.exe` |
+            | **Linux** | `RemoteDesktop-Linux.tar.gz` | Extract and run `./RemoteDesktop` |
+
+            ### How to use
+            1. Open the app — your 6-character address code appears automatically
+            2. Share your code with the other person
+            3. Enter their code and click **Connect** to view their screen
+            4. Press **F8** to request remote control
+
+            ### Features
+            - Screen sharing across any network
+            - Remote mouse & keyboard control (with permission)
+            - Resizable viewer window
+            - Adaptive quality for low-lag streaming
+          files: |
+            artifacts/RemoteDesktop-macOS-DMG/RemoteDesktop-macOS.dmg
+            artifacts/RemoteDesktop-macOS/RemoteDesktop-macOS.zip
+            artifacts/RemoteDesktop-Windows/RemoteDesktop-Windows.zip
+            artifacts/RemoteDesktop-Linux/RemoteDesktop-Linux.tar.gz

@@ -2,10 +2,7 @@
 Relay Client Viewer
 
 Connects to a relay server using a session code to view a remote screen.
-This enables remote desktop connections across the internet.
-
-Usage:
-    python relay_viewer.py --relay ws://relay-server.com:8765 --code ABC123
+Supports window resize, minimize/maximize, and remote control requests.
 """
 
 import asyncio
@@ -16,7 +13,6 @@ import os
 import json
 from typing import Optional
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
@@ -47,8 +43,7 @@ logger = logging.getLogger(__name__)
 class RelayViewer:
     """
     PyGame-based viewer that connects through a relay server.
-
-    Uses a session code to connect to a remote host through the relay.
+    Supports resize, minimize/maximize, and remote control requests.
     """
 
     def __init__(self, relay_url: str, session_code: str, scale: float = 1.0):
@@ -65,7 +60,7 @@ class RelayViewer:
         self.screen: Optional[pygame.Surface] = None
         self.running = False
 
-        # Remote screen dimensions (will be set from first frame)
+        # Remote screen dimensions
         self.remote_width = 0
         self.remote_height = 0
         self.display_width = 0
@@ -79,6 +74,11 @@ class RelayViewer:
 
         # Latest frame for rendering
         self._latest_surface: Optional[pygame.Surface] = None
+        self._original_surface: Optional[pygame.Surface] = None
+
+        # Remote control state
+        self._has_control = False
+        self._control_requested = False
 
     async def connect(self) -> bool:
         """Connect to relay server with session code."""
@@ -94,15 +94,13 @@ class RelayViewer:
                 close_timeout=60
             )
 
-            # Send join request
             join_msg = bytes([RelayMessageType.CLIENT_JOIN]) + json.dumps({
                 'session_code': self.session_code
             }).encode('utf-8')
 
             await self._websocket.send(join_msg)
 
-            # Wait for response
-            response = await asyncio.wait_for(self._websocket.recv(), timeout=10.0)
+            response = await asyncio.wait_for(self._websocket.recv(), timeout=15.0)
 
             if isinstance(response, str):
                 response = response.encode()
@@ -134,7 +132,7 @@ class RelayViewer:
             return False
 
     def init_display(self, width: int, height: int) -> None:
-        """Initialize PyGame display with given dimensions."""
+        """Initialize PyGame display with resizable window."""
         pygame.init()
 
         self.remote_width = width
@@ -142,38 +140,49 @@ class RelayViewer:
         self.display_width = int(width * self.scale)
         self.display_height = int(height * self.scale)
 
-        self.screen = pygame.display.set_mode((self.display_width, self.display_height))
-        pygame.display.set_caption(f"Remote Desktop - {self.session_code}")
+        # RESIZABLE flag allows minimize/maximize/resize
+        self.screen = pygame.display.set_mode(
+            (self.display_width, self.display_height),
+            pygame.RESIZABLE
+        )
+        self._update_title()
 
         logger.info(f"Display: {self.display_width}x{self.display_height} (scale: {self.scale})")
+
+    def _update_title(self):
+        """Update window title with status info."""
+        control_str = " [CONTROL]" if self._has_control else ""
+        fps_str = f" | {self.fps:.1f} FPS" if self.fps > 0 else ""
+        pygame.display.set_caption(
+            f"Remote Desktop - {self.session_code}{control_str}{fps_str}"
+        )
 
     def on_frame(self, frame: DecodedFrame) -> None:
         """Process incoming frame."""
         try:
-            # Initialize display on first frame
             if not self.screen:
                 self.init_display(frame.width, frame.height)
 
-            # Convert numpy array to pygame surface
-            surface = pygame.surfarray.make_surface(frame.data.swapaxes(0, 1))
+            # Store original-size surface
+            self._original_surface = pygame.surfarray.make_surface(
+                frame.data.swapaxes(0, 1)
+            )
 
-            # Scale if needed
-            if self.scale != 1.0:
-                surface = pygame.transform.scale(surface, (self.display_width, self.display_height))
+            # Scale to current display size
+            self._latest_surface = pygame.transform.scale(
+                self._original_surface,
+                (self.display_width, self.display_height)
+            )
 
-            self._latest_surface = surface
             self.frame_count += 1
             self._fps_count += 1
 
-            # Update FPS counter
             now = time.time()
             if now - self._fps_start >= 1.0:
                 self.fps = self._fps_count / (now - self._fps_start)
                 self._fps_count = 0
                 self._fps_start = now
-                pygame.display.set_caption(
-                    f"Remote Desktop - {self.session_code} | {self.fps:.1f} FPS"
-                )
+                self._update_title()
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
@@ -184,9 +193,22 @@ class RelayViewer:
             self.screen.blit(self._latest_surface, (0, 0))
             pygame.display.flip()
 
+    async def request_control(self) -> None:
+        """Request remote control from host."""
+        if self._websocket and not self._has_control:
+            msg = bytes([RelayMessageType.REQUEST_CONTROL]) + json.dumps({
+                'message': 'Requesting remote control'
+            }).encode('utf-8')
+            try:
+                await self._websocket.send(msg)
+                self._control_requested = True
+                logger.info("Control request sent to host")
+            except Exception as e:
+                logger.error(f"Failed to send control request: {e}")
+
     async def send_input(self, msg: InputMessage) -> None:
-        """Send input event to host."""
-        if self._websocket:
+        """Send input event to host (only if control is granted)."""
+        if self._websocket and self._has_control:
             try:
                 await self._websocket.send(msg.pack())
             except Exception as e:
@@ -198,64 +220,96 @@ class RelayViewer:
             if event.type == pygame.QUIT:
                 return False
 
+            elif event.type == pygame.VIDEORESIZE:
+                # Window was resized
+                self.display_width = event.w
+                self.display_height = event.h
+                self.screen = pygame.display.set_mode(
+                    (self.display_width, self.display_height),
+                    pygame.RESIZABLE
+                )
+                # Re-scale the current frame
+                if self._original_surface:
+                    self._latest_surface = pygame.transform.scale(
+                        self._original_surface,
+                        (self.display_width, self.display_height)
+                    )
+                self.scale = self.display_width / max(self.remote_width, 1)
+                logger.info(f"Window resized to {self.display_width}x{self.display_height}")
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     return False
-                await self.send_input(InputMessage(
-                    event_type=InputEventType.KEY_DOWN,
-                    key_code=event.key,
-                    modifiers=self._get_modifiers()
-                ))
+                # F8 = request/toggle control
+                if event.key == pygame.K_F8:
+                    await self.request_control()
+                    continue
+                if self._has_control:
+                    await self.send_input(InputMessage(
+                        event_type=InputEventType.KEY_DOWN,
+                        key_code=event.key,
+                        modifiers=self._get_modifiers()
+                    ))
 
             elif event.type == pygame.KEYUP:
-                await self.send_input(InputMessage(
-                    event_type=InputEventType.KEY_UP,
-                    key_code=event.key,
-                    modifiers=self._get_modifiers()
-                ))
+                if self._has_control:
+                    await self.send_input(InputMessage(
+                        event_type=InputEventType.KEY_UP,
+                        key_code=event.key,
+                        modifiers=self._get_modifiers()
+                    ))
 
             elif event.type == pygame.MOUSEMOTION:
-                x, y = self._scale_mouse_pos(event.pos)
-                await self.send_input(InputMessage(
-                    event_type=InputEventType.MOUSE_MOVE,
-                    x=x, y=y
-                ))
+                if self._has_control:
+                    x, y = self._scale_mouse_pos(event.pos)
+                    await self.send_input(InputMessage(
+                        event_type=InputEventType.MOUSE_MOVE,
+                        x=x, y=y
+                    ))
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                x, y = self._scale_mouse_pos(event.pos)
-                await self.send_input(InputMessage(
-                    event_type=InputEventType.MOUSE_DOWN,
-                    x=x, y=y,
-                    button=self._map_button(event.button)
-                ))
+                if self._has_control:
+                    x, y = self._scale_mouse_pos(event.pos)
+                    await self.send_input(InputMessage(
+                        event_type=InputEventType.MOUSE_DOWN,
+                        x=x, y=y,
+                        button=self._map_button(event.button)
+                    ))
 
             elif event.type == pygame.MOUSEBUTTONUP:
-                x, y = self._scale_mouse_pos(event.pos)
-                await self.send_input(InputMessage(
-                    event_type=InputEventType.MOUSE_UP,
-                    x=x, y=y,
-                    button=self._map_button(event.button)
-                ))
+                if self._has_control:
+                    x, y = self._scale_mouse_pos(event.pos)
+                    await self.send_input(InputMessage(
+                        event_type=InputEventType.MOUSE_UP,
+                        x=x, y=y,
+                        button=self._map_button(event.button)
+                    ))
 
             elif event.type == pygame.MOUSEWHEEL:
-                x, y = pygame.mouse.get_pos()
-                x, y = self._scale_mouse_pos((x, y))
-                await self.send_input(InputMessage(
-                    event_type=InputEventType.MOUSE_SCROLL,
-                    x=x, y=y,
-                    scroll_delta=event.y * 3
-                ))
+                if self._has_control:
+                    x, y = pygame.mouse.get_pos()
+                    x, y = self._scale_mouse_pos((x, y))
+                    await self.send_input(InputMessage(
+                        event_type=InputEventType.MOUSE_SCROLL,
+                        x=x, y=y,
+                        scroll_delta=event.y * 3
+                    ))
+
+            # Handle window minimize/restore - keep running
+            elif event.type == pygame.ACTIVEEVENT:
+                pass  # Don't disconnect on focus change
 
         return True
 
     def _scale_mouse_pos(self, pos: tuple) -> tuple:
         """Scale mouse position to remote coordinates."""
-        x = int(pos[0] / self.scale)
-        y = int(pos[1] / self.scale)
+        if self.display_width == 0 or self.display_height == 0:
+            return pos
+        x = int(pos[0] * self.remote_width / self.display_width)
+        y = int(pos[1] * self.remote_height / self.display_height)
         return x, y
 
     def _get_modifiers(self) -> int:
-        """Get keyboard modifiers."""
         mods = pygame.key.get_mods()
         modifiers = 0
         if mods & pygame.KMOD_SHIFT:
@@ -269,7 +323,6 @@ class RelayViewer:
         return modifiers
 
     def _map_button(self, button: int) -> MouseButton:
-        """Map PyGame button to protocol button."""
         if button == 1:
             return MouseButton.LEFT
         elif button == 2:
@@ -291,7 +344,6 @@ class RelayViewer:
                 if len(message) < 1:
                     continue
 
-                # Check for relay control messages
                 msg_type = message[0]
 
                 if msg_type == RelayMessageType.DISCONNECT:
@@ -313,6 +365,27 @@ class RelayViewer:
                         pass
                     continue
 
+                elif msg_type == RelayMessageType.CONTROL_GRANTED:
+                    self._has_control = True
+                    self._control_requested = False
+                    logger.info("Remote control GRANTED by host")
+                    self._update_title()
+                    continue
+
+                elif msg_type == RelayMessageType.CONTROL_DENIED:
+                    self._has_control = False
+                    self._control_requested = False
+                    logger.info("Remote control DENIED by host")
+                    self._update_title()
+                    continue
+
+                elif msg_type == RelayMessageType.CONTROL_REVOKED:
+                    self._has_control = False
+                    self._control_requested = False
+                    logger.info("Remote control REVOKED by host")
+                    self._update_title()
+                    continue
+
                 # Try to parse as protocol frame message
                 try:
                     if len(message) >= HEADER_SIZE:
@@ -320,8 +393,6 @@ class RelayViewer:
                         if proto_type == MessageType.FRAME:
                             payload = message[HEADER_SIZE:HEADER_SIZE + payload_length]
                             frame_msg = FrameMessage.unpack(payload)
-
-                            # Decode frame
                             decoded = self.decoder.decode(
                                 frame_msg.frame_data,
                                 frame_number=frame_msg.frame_number
@@ -339,7 +410,6 @@ class RelayViewer:
 
     async def run(self) -> None:
         """Main viewer loop."""
-        # Connect to relay
         if not await self.connect():
             print("Failed to connect. Check the session code and try again.")
             return
@@ -347,15 +417,13 @@ class RelayViewer:
         self.running = True
         self._fps_start = time.time()
 
-        # Start receive task
         receive_task = asyncio.create_task(self.receive_loop())
 
         print("Connected! Waiting for screen data...")
-        print("Press ESC or close window to disconnect.")
+        print("Press ESC to disconnect, F8 to request control.")
 
         try:
             while self.running:
-                # Handle PyGame events
                 if self.screen:
                     if not await self.handle_events():
                         break
@@ -376,6 +444,10 @@ class RelayViewer:
 
             pygame.quit()
             logger.info("Viewer closed")
+
+    @property
+    def has_control(self) -> bool:
+        return self._has_control
 
 
 async def run_relay_viewer(relay_url: str, session_code: str, scale: float = 1.0) -> None:
@@ -405,17 +477,18 @@ if __name__ == "__main__":
     )
 
     print(f"""
-╔══════════════════════════════════════════════════════════════╗
-║           Remote Desktop - Viewer (Relay Mode)               ║
-╠══════════════════════════════════════════════════════════════╣
-║  Relay:  {args.relay:<52}║
-║  Code:   {args.code:<52}║
-║  Scale:  {args.scale:<52}║
-╠══════════════════════════════════════════════════════════════╣
-║  Controls:                                                   ║
-║    - ESC or close window to disconnect                       ║
-║    - Mouse and keyboard are sent to remote                   ║
-╚══════════════════════════════════════════════════════════════╝
++==============================================================+
+|           Remote Desktop - Viewer                            |
++--------------------------------------------------------------+
+|  Relay:  {args.relay:<52}|
+|  Code:   {args.code:<52}|
+|  Scale:  {args.scale:<52}|
++--------------------------------------------------------------+
+|  Controls:                                                   |
+|    - ESC to disconnect                                       |
+|    - F8 to request remote control                            |
+|    - Resize window freely                                    |
++==============================================================+
 """)
 
     asyncio.run(run_relay_viewer(args.relay, args.code, args.scale))

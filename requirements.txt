@@ -5,6 +5,7 @@ websockets>=12.0
 Pillow>=10.0.0
 numpy>=1.24.0
 pygame>=2.5.0
+pyautogui>=0.9.54
 
 # macOS screen capture (optional but recommended on macOS)
 pyobjc-framework-Quartz>=9.0; sys_platform == 'darwin'
