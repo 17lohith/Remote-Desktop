@@ -23,7 +23,7 @@ import logging
 #   Local testing : ws://127.0.0.1:8765
 #   Production    : ws://<EC2_PUBLIC_IP>:8765
 # ---------------------------------------------------------------
-RELAY_URL = "ws://13.235.64.11:8765"
+RELAY_URL = "ws://13.204.132.109:8765"
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
