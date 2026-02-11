@@ -20,7 +20,7 @@ from relay.viewer import RelayViewer
 #   Local  : ws://127.0.0.1:8765
 #   EC2    : ws://<EC2_PUBLIC_IP>:8765
 # ---------------------------------------------------------------
-DEFAULT_RELAY = "ws://127.0.0.1:8765"
+DEFAULT_RELAY = "ws://13.235.64.11:8765"
 
 
 def main():
